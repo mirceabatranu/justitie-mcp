@@ -32,7 +32,7 @@ from .portal import fara_diacritice
 
 BASE = os.environ.get("JUSTITIE_LEGISLATIE_URL", "https://legislatie.just.ro")
 SOAP_URL = BASE + "/apiws/FreeWebService.svc/SOAP"
-UA = "Mozilla/5.0 (Windows NT 10.0; Win64; x64) justitie-mcp/0.2"
+UA = "Mozilla/5.0 (Windows NT 10.0; Win64; x64) justitie-mcp/0.3"
 TIMEOUT = float(os.environ.get("JUSTITIE_TIMEOUT", "120"))
 CACHE_ORE = float(os.environ.get("JUSTITIE_LEGISLATIE_CACHE_ORE", "24"))
 CACHE_DIR = Path(

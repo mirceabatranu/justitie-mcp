@@ -6,12 +6,15 @@ from datetime import date
 
 from mcp.server.fastmcp import FastMCP
 
-from . import analiza, legislatie, portal
+from . import analiza, legislatie, portal, registre
 from .institutii import INSTITUTII
 
 mcp = FastMCP(
     "justitie",
     instructions=(
+        "Registre MJ de pe data.gov.ro (registru_*): Registrul Național ONG (actualizat "
+        "săptămânal), experți judiciari, traducători, notari, executori; spune utilizatorului "
+        "data sursei. "
         "Legislație (legislatie.just.ro, uneltele lege_*): caută actul cu lege_cauta, apoi "
         "citește doar articolele necesare cu lege_articol sau caută în el cu lege_cauta_in_act; "
         "nu cere tot cuprinsul unui cod mare fără filtru. Textul e forma consolidată cea mai "
@@ -327,6 +330,90 @@ def lege_cauta_in_act(act: str, text: str, la_data: str | None = None, max_rezul
         return _eroare(e)
     rez = a.cauta(text, max_rezultate=max(1, min(max_rezultate, 100)))
     return {"act": _antet(a), "gasite": len(rez), "articole": rez}
+
+
+# --------------------------------------------------------------------------- registre data.gov.ro
+
+_SENS_DETALII = {
+    "ong": "scopul inițial al organizației",
+    "experti": "specializarea (ex. „contabilitate”, „construcții”)",
+    "traducatori": "limbile (ex. „germană”)",
+    "notari": "camera notarilor",
+    "executori": "camera executorilor (curtea de apel)",
+}
+
+
+@mcp.tool()
+def registru_cauta(
+    registru: str,
+    nume: str | None = None,
+    judet: str | None = None,
+    localitate: str | None = None,
+    detalii: str | None = None,
+    categorie: str | None = None,
+    numar: str | None = None,
+    limita: int = 30,
+) -> dict:
+    """Caută în registrele publice ale Ministerului Justiției (de pe data.gov.ro, copiate local).
+
+    `registru`: „ong” (Registrul Național ONG: asociații, fundații, federații, uniuni, persoane
+    juridice străine; `categorie` = asociatie / fundatie / federatie / uniune /
+    persoana_juridica_straina), „experti” (experți judiciari), „traducatori”, „notari”,
+    „executori”. `detalii` caută în: ONG – scop; experți – specializare; traducători – limbi;
+    notari/executori – camera. `numar`: nr. în Registrul ONG (ex. „1039/A/2023”), nr. autorizație
+    sau legitimație. Toate criteriile: cuvinte conținute, fără diacritice.
+
+    Prima căutare într-un registru îl descarcă (ONG: ~1 minut, ~150.000 de înregistrări);
+    apoi se reîmprospătează singur (ONG la 7 zile, restul la 30).
+    """
+    registru = (registru or "").strip().lower()
+    out: dict = {}
+    try:
+        if registru in registre.REGISTRE and registre.trebuie_actualizat(registru):
+            out["actualizare"] = registre.actualizeaza([registru])
+        crit = dict(nume=nume, judet=judet, localitate=localitate, detalii=detalii,
+                    categorie=categorie, numar=numar, limita=limita)
+        rez = registre.cauta(registru, **crit)
+        if rez["total"] == 0 and nume:
+            rez = registre.cauta(registru, aproximativ=True, **crit)
+            if rez["total"]:
+                rez["potrivire_aproximativa"] = ("Nimic exact; acestea se potrivesc după rădăcina cuvintelor "
+                                                 "(ex. „Crucea” ~ „Cruce”). Verifică denumirea.")
+    except registre.RegistruError as e:
+        return _eroare(e)
+    surse = [s for s in registre.stare() if s["registru"] == registru]
+    out.update(rez)
+    out["sursa"] = [{"categorie": s["categorie"], "fisier": s["nume_fisier"], "data_sursa": s["data_sursa"],
+                     "inregistrari": s["randuri"]} for s in surse]
+    out["campul_detalii"] = _SENS_DETALII.get(registru)
+    vechi = [s["data_sursa"] for s in surse if s["data_sursa"] and s["data_sursa"] < "2026-01-01"]
+    if vechi:
+        out["atentie"] = (f"Ministerul Justiției a publicat ultima dată acest registru pe data.gov.ro la {max(vechi)}. "
+                          "Pentru confirmare, verifică pe site-ul organizației profesionale.")
+    if registru == "ong":
+        out["nota"] = "Registrul ONG nu are CUI; starea goală înseamnă de regulă organizație activă."
+    return out
+
+
+@mcp.tool()
+def registru_actualizeaza(registre_de_actualizat: list[str] | None = None) -> dict:
+    """Descarcă din nou registrele de pe data.gov.ro (implicit toate: ong, experti, traducatori,
+    notari, executori) și înlocuiește copia locală. Durează ~1–2 minute pentru toate.
+    """
+    try:
+        return {"rezultat": registre.actualizeaza(registre_de_actualizat)}
+    except registre.RegistruError as e:
+        return _eroare(e)
+
+
+@mcp.tool()
+def registru_stare() -> dict:
+    """Ce registre sunt descărcate local, din ce dată e sursa și când s-au actualizat."""
+    return {
+        "registre": {k: v["descriere"] for k, v in registre.REGISTRE.items()},
+        "local": registre.stare(),
+        "baza_de_date": str(registre.DB_PATH),
+    }
 
 
 def run() -> None:
