@@ -6,12 +6,16 @@ from datetime import date
 
 from mcp.server.fastmcp import FastMCP
 
-from . import analiza, portal
+from . import analiza, legislatie, portal
 from .institutii import INSTITUTII
 
 mcp = FastMCP(
     "justitie",
     instructions=(
+        "Legislație (legislatie.just.ro, uneltele lege_*): caută actul cu lege_cauta, apoi "
+        "citește doar articolele necesare cu lege_articol sau caută în el cu lege_cauta_in_act; "
+        "nu cere tot cuprinsul unui cod mare fără filtru. Textul e forma consolidată cea mai "
+        "recentă, sau cea de la o dată cu la_data; citează articolul și data consolidării. "
         "Date publice din Portalul Instanțelor (portal.just.ro): dosare, părți, termene, "
         "soluții pe scurt și ședințe, pentru toate judecătoriile, tribunalele și curțile de "
         "apel. NU conține dosarele ICCJ. Totul e doar citire. Portalul nu are CUI: identificarea "
@@ -176,6 +180,153 @@ def portal_institutii(filtru: str | None = None) -> dict:
     k = portal._cheie_institutie(filtru) if filtru else ""
     lista = [{"cod": c, "denumire": n} for c, n in INSTITUTII.items() if k in portal._cheie_institutie(n)]
     return {"total": len(lista), "institutii": sorted(lista, key=lambda x: x["denumire"])}
+
+
+# --------------------------------------------------------------------------- legislație
+
+
+def _act_la_data(act: str | int, la_data: str | None) -> "legislatie.Act":
+    a = legislatie.act(legislatie.id_din_link(act))
+    if la_data:
+        fid = legislatie.forma_la_data(a, la_data)
+        if fid != a.id:
+            a = legislatie.act(fid)
+    return a
+
+
+def _antet(a: "legislatie.Act") -> dict:
+    h = a.antet()
+    h["articole"] = len(a.articole)
+    if a.trimiteri:
+        h["vezi_textul_in"] = a.trimiteri
+        h["nota"] = ("Documentul are puțin text propriu și trimite la alt document (de ex. legea care "
+                     "aprobă un cod). Pentru text, folosește id-urile din vezi_textul_in.")
+    return h
+
+
+@mcp.tool()
+def lege_cauta(
+    titlu: str | None = None,
+    text: str | None = None,
+    numar: str | None = None,
+    an: int | None = None,
+    tip: str | None = None,
+    pagina: int = 1,
+    rezultate: int = 10,
+) -> dict:
+    """Caută acte normative pe legislatie.just.ro (legi, OUG, OG, HG, ordine, decizii CCR,
+    decizii ICCJ RIL/HP publicate în Monitorul Oficial...).
+
+    `titlu`: cuvinte din titlu (cel mai precis, ex. „Codul fiscal”, „contabilitatii”);
+    `text`: cuvinte din corpul actului (întoarce și un fragment); `numar` + `an` pentru un act
+    anume (ex. numar=82, an=1991). `tip` filtrează după tipul actului (LEGE, ORDONANȚĂ DE
+    URGENȚĂ, HOTĂRÂRE, ORDIN...). Întoarce id-ul de folosit în lege_cuprins / lege_articol.
+    """
+    try:
+        rez = legislatie.cauta(text=text, titlu=titlu, numar=numar, an=an, pagina=pagina, rezultate=rezultate)
+    except legislatie.LegislatieError as e:
+        return _eroare(e)
+    if an:  # portalul nu aplică strict filtrul de an
+        rez = [r for r in rez if (r["data"] or "").startswith(str(an)) or f" {an}" in r["titlu"]]
+    if tip:
+        k = portal.fara_diacritice(tip).upper()
+        rez = [r for r in rez if k in portal.fara_diacritice(r["tip"] or r["titlu"]).upper()]
+    for r in rez:
+        if not r["fragment"]:
+            r.pop("fragment")
+    return {"pagina": pagina, "rezultate": len(rez), "acte": rez,
+            "nota": "Portalul nu ordonează după relevanță: verifică titlul și data fiecărui act."}
+
+
+@mcp.tool()
+def lege_cuprins(
+    act: str,
+    la_data: str | None = None,
+    cu_articole: bool = False,
+    filtru: str | None = None,
+) -> dict:
+    """Antetul și cuprinsul unui act, în forma consolidată (implicit cea mai recentă).
+
+    `act`: id-ul (din lege_cauta) sau linkul legislatie.just.ro. `la_data` (AAAA-LL-ZZ): forma
+    consolidată în vigoare la acea dată. `cu_articole`: listează și articolele (număr +
+    denumire); la coduri mari restrânge cu `filtru` (text din titlu/capitol/denumire, ex. „TVA”,
+    „microîntreprinderi”). Include ultimele consolidări (istoricul).
+    """
+    try:
+        a = _act_la_data(act, la_data)
+    except (legislatie.LegislatieError, ValueError) as e:
+        return _eroare(e)
+    out = _antet(a)
+    out["istoric_consolidari"] = a.istoric[:12]
+    out["istoric_total"] = len(a.istoric)
+    k = portal.fara_diacritice(filtru).lower() if filtru else None
+    potriveste = lambda s: not k or k in portal.fara_diacritice(s or "").lower()  # noqa: E731
+    out["structura"] = [s["titlu"] for s in a.structura
+                        if s["nivel"] != "ANX" and (potriveste(s["titlu"]) or potriveste(s["cale"]))][:300]
+    if cu_articole:
+        arts = [{"nr": v["nr"].replace("Articolul ", "Art. "), "denumire": v["denumire"], "cale": v["cale"]}
+                for v in a.articole.values()
+                if potriveste(v["cale"]) or potriveste(v["denumire"]) or potriveste(v["nr"])]
+        if len(arts) > 400:
+            out["articole_trunchiate"] = len(arts)
+            arts = arts[:400]
+        # calea se repetă: o păstrăm doar când se schimbă
+        prev = None
+        for x in arts:
+            if x["cale"] == prev:
+                x.pop("cale")
+            else:
+                prev = x["cale"]
+        out["lista_articole"] = arts
+    return out
+
+
+@mcp.tool()
+def lege_articol(
+    act: str,
+    articole: list[str],
+    la_data: str | None = None,
+    note: bool = True,
+    max_caractere: int = 15000,
+) -> dict:
+    """Textul consolidat al unor articole (ex. ["291", "25^1", "Anexa 1"]).
+
+    `note`: include notele de modificare „(la 01-08-2025, ... a fost modificat de Legea ...)”,
+    utile ca să știi de când se aplică textul. `la_data`: textul în vigoare la o dată anume.
+    """
+    try:
+        a = _act_la_data(act, la_data)
+    except (legislatie.LegislatieError, ValueError) as e:
+        return _eroare(e)
+    gasite, lipsa = [], []
+    for nr in articole[:30]:
+        x = a.articol(nr, note=note)
+        if x is None:
+            lipsa.append(nr)
+            continue
+        if len(x["text"]) > max_caractere:
+            x["text"] = x["text"][:max_caractere] + "\n[… trunchiat]"
+            x["trunchiat"] = True
+        gasite.append(x)
+    out = {"act": _antet(a), "articole": gasite}
+    if lipsa:
+        out["negasite"] = lipsa
+        out["sugestie"] = "Verifică numerotarea cu lege_cuprins(cu_articole=True) sau lege_cauta_in_act."
+    return out
+
+
+@mcp.tool()
+def lege_cauta_in_act(act: str, text: str, la_data: str | None = None, max_rezultate: int = 30) -> dict:
+    """Caută un text în articolele unui act (ex. „plafonul de 100.000 euro” în Codul fiscal) și
+    întoarce articolele în care apare, cu fragmente. Diacriticele nu contează. Notele de
+    modificare nu sunt incluse în căutare.
+    """
+    try:
+        a = _act_la_data(act, la_data)
+    except (legislatie.LegislatieError, ValueError) as e:
+        return _eroare(e)
+    rez = a.cauta(text, max_rezultate=max(1, min(max_rezultate, 100)))
+    return {"act": _antet(a), "gasite": len(rez), "articole": rez}
 
 
 def run() -> None:

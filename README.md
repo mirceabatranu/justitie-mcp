@@ -1,12 +1,42 @@
 # justitie-mcp
 
 Server MCP care îi dă lui Claude (Claude Code / Claude Desktop) acces la **datele publice ale
-instanțelor din România**, direct din serviciul oficial al Portalului Instanțelor
-(`portalquery.just.ro`). Nu trece prin niciun intermediar, nu cere cont și nu cere cheie API.
+instanțelor din România** și la **legislația consolidată**, direct din serviciile oficiale ale
+Ministerului Justiției (`portalquery.just.ro` și `legislatie.just.ro`). Nu trece prin niciun
+intermediar, nu cere cont și nu cere cheie API.
 
 Proiect neoficial, fără legătură cu Ministerul Justiției.
 
-## Ce poate face (faza 1: portal.just.ro)
+## Legislație (legislatie.just.ro)
+
+| Unealtă | Ce face |
+|---|---|
+| `lege_cauta` | Caută acte după titlu, text, număr și an, cu filtru pe tip (LEGE, OUG, HG, ORDIN…). Întoarce id-ul actului, Monitorul Oficial și linkul |
+| `lege_cuprins` | Antetul, data ultimei consolidări, istoricul consolidărilor, titlurile și capitolele, plus lista articolelor, opțional filtrată (de ex. „microîntreprinderi”) |
+| `lege_articol` | Textul consolidat al unor articole (`291`, `25^1`, `Anexa 1`), cu sau fără notele „(la 01-08-2025, … a fost modificat de …)” |
+| `lege_cauta_in_act` | În ce articole dintr-un act apare un text (de ex. „100.000 euro” în Codul fiscal) |
+
+Toate primesc opțional `la_data` (AAAA-LL-ZZ) și atunci folosesc **forma consolidată în vigoare
+la acea dată**, aleasă din istoricul de consolidări.
+
+Exemple de întrebări pentru Claude:
+
+- „Ce spune art. 291 din Codul fiscal despre cotele de TVA? Dar la 1 ianuarie 2025?”
+- „Care sunt condițiile de microîntreprindere acum?”
+- „Unde apare plafonul de 100.000 euro în Codul fiscal?”
+- „Arată-mi art. 9 din Legea contabilității 82/1991.”
+
+De știut:
+
+- Căutarea portalului **nu ordonează după relevanță**, iar filtrul de an nu e strict. Serverul
+  aplică filtrul de an și tipul local, dar verifică titlul actului.
+- Unele acte sunt doar „învelișul” altuia: Legea 227/2015 aprobă Codul fiscal, care are textul
+  în alt document. Atunci primești `vezi_textul_in` cu id-ul bun.
+- Paginile mari se salvează local pentru 24 de ore, în `%LOCALAPPDATA%\justitie-mcp\legislatie`.
+  Pagina Codului fiscal are ~7,5 MB și se descarcă o singură dată; Claude primește doar
+  articolele cerute.
+
+## Instanțe (portal.just.ro)
 
 | Unealtă | Ce face |
 |---|---|
@@ -84,8 +114,9 @@ justitie-mcp dosar 1234/30/2025
 | `JUSTITIE_TIMEOUT` | `120` | secunde de așteptare după portal |
 | `JUSTITIE_CACHE_SECUNDE` | `600` | cât păstrează răspunsurile în cache |
 | `JUSTITIE_PORTAL_URL` | `http://portalquery.just.ro/query.asmx` | adresa serviciului |
+| `JUSTITIE_LEGISLATIE_CACHE_ORE` | `24` | cât păstrează paginile de legislație pe disc |
+| `JUSTITIE_CACHE_DIR` | `%LOCALAPPDATA%\justitie-mcp` | unde se salvează cache-ul |
 
 ## Ce urmează
 
-- Faza 2: legislație (`legislatie.just.ro`, serviciul SOAP oficial `FreeWebService`)
 - Faza 3: registre de pe data.gov.ro (experți judiciari, traducători, practicieni în insolvență)

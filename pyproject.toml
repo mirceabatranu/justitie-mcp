@@ -1,7 +1,7 @@
 [project]
 name = "justitie-mcp"
-version = "0.1.0"
-description = "Server MCP pentru datele publice ale instantelor din Romania (portal.just.ro): dosare, parti, termene, solutii, sedinte"
+version = "0.2.0"
+description = "Server MCP pentru datele publice ale instantelor (portal.just.ro) si legislatia consolidata (legislatie.just.ro) din Romania"
 readme = "README.md"
 requires-python = ">=3.10"
 dependencies = [
