@@ -32,7 +32,7 @@ NS = "portalquery.just.ro"
 LIMITA_PORTAL = 1000
 TIMEOUT = float(os.environ.get("JUSTITIE_TIMEOUT", "120"))
 CACHE_SECUNDE = int(os.environ.get("JUSTITIE_CACHE_SECUNDE", "600"))
-USER_AGENT = "justitie-mcp/0.2 (+client MCP local)"
+USER_AGENT = "justitie-mcp/0.3 (+client MCP local)"
 
 _T = "{%s}" % NS
 
